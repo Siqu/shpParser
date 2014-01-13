@@ -7,8 +7,14 @@ use sP\exception\FileNotFoundException;
 use sP\exception\InvalidDataTypeException;
 use sP\exception\InvalidFileCodeException;
 use sP\exception\InvalidShapeTypeException;
+use sP\exception\InvalidContentLengthException;
 
 require_once('classes/ConnectionFactory.php');
+require_once('classes/exceptions/InvalidContentLengthException.php');
+require_once('classes/exceptions/FileNotFoundException.php');
+require_once('classes/exceptions/InvalidDataTypeException.php');
+require_once('classes/exceptions/InvalidFileCodeException.php');
+require_once('classes/exceptions/InvalidShapeTypeException.php');
 
 define('DOUBLE_TYPE', 'd');
 define('BIG_ENDIAN', 'N');
@@ -29,6 +35,8 @@ class shpParser {
     private $conn = null;
     private $shpFile = null;
     private $shpId = null;
+    private $file_length = 0;
+    private $read_length = 0;
 
     /**
      * This array contains the known data types.
@@ -80,6 +88,7 @@ class shpParser {
         $this->conn->beginTransaction();
 
         $this->loadMainFileHeader();
+        $this->loadMainFileData();
 
         //$this->conn->commit();
 
@@ -88,6 +97,7 @@ class shpParser {
 
     /**
      * Load the main SHP File Header.
+     *
      * The header is 100 bytes long and is structured as follows:
      * <ul>
      *  <li>Byte 0: File Code (Integer Big Endian)</li>
@@ -117,17 +127,11 @@ class shpParser {
 
         fseek($this->shpFile, 24);
 
-        $file_length = $this->loadData(BIG_ENDIAN);
+        $this->file_length = $this->loadData(BIG_ENDIAN);
         $version = $this->loadData(LITTLE_ENDIAN);
         $shape_type = $this->loadData(LITTLE_ENDIAN);
 
-        $st = $this->conn->prepare('SELECT * FROM Shape_types WHERE id = ":id"');
-        $st->execute(
-            array(
-                ':id' => $shape_type
-            ));
-
-        if($st->rowCount() == 0) {
+        if(!$this->doesShapeTypeExist($shape_type)) {
             throw new InvalidShapeTypeException('The shape type '.$shape_type.' is unknown.');
         }
 
@@ -137,13 +141,335 @@ class shpParser {
         $st->execute(
             array(
                 ':path' => $this->path,
-                ':file_length' => $file_length,
+                ':file_length' => $this->file_length,
                 ':version' => $version,
                 ':shape_type' => $shape_type,
                 ':bounding_box' => $box_id
             ));
 
         $this->shpId = $this->conn->lastInsertId();
+    }
+
+    /**
+     * Load all records
+     *
+     * The record header is 8 bytes long and structured as follows:
+     * <ul>
+     *  <li>Byte 0: Record Number (Integer Big Endian)</li>
+     *  <li>Byte 4: Content Length (Integer Big Endian)</li>
+     * </ul>
+     *
+     * The record content depends on the first 4 bytes, which define the shape type.
+     * @see loadRecord()
+     */
+    private function loadMainFileData() {
+        $this->read_length = 50;
+
+        while($this->read_length < $this->file_length) {
+            $cl = $this->loadRecord();
+
+            $this->read_length += $cl + 4;
+        }
+    }
+
+    /**
+     * Load a single record into the database.
+     *
+     * The record content is structured as follows:
+     * <ul>
+     *  <li>Byte 0: Shape Type (Integer Little Endian)</li>
+     *  <li>
+     *      Depends on the shape type.
+     *
+     *      See:
+     *      <ul>
+     *          <li>{@link loadPoint()}</li>
+     *          <li>{@link loadMultiPoint()}</li>
+     *      </ul>
+     *  </li>
+     *
+     * </ul>
+     *
+     * @return int The byte size of the read record.
+     * @throws exception\InvalidShapeTypeException Thrown when the read Shape Type is unknown.
+     */
+    private function loadRecord() {
+        $rec_number = $this->loadData(BIG_ENDIAN);
+        $content_length = $this->loadData(BIG_ENDIAN);
+        $shape_type = $this->loadData(LITTLE_ENDIAN);
+
+        if(!$this->doesShapeTypeExist($shape_type)) {
+            throw new InvalidShapeTypeException('The shape type '.$shape_type.' is unknown.');
+        }
+
+        $st = $this->conn->prepare('INSERT INTO Records (record_number, record_length, shape_file, shape_type) VALUES (:record_number, :record_length, :shape_file, :shape_type)');
+        $st->execute(
+            array(
+                ':record_number' => $rec_number,
+                ':record_length' => $content_length,
+                ':shape_file' => $this->shpId,
+                ':shape_type' => $shape_type
+            ));
+
+        $rec_id = $this->conn->lastInsertId();
+
+        switch($shape_type) {
+            case 0:
+                //NullShape
+                break;
+            case 1:
+                //Point
+                $id = $this->loadPoint($content_length, false, false);
+
+                $st = $this->conn->prepare('UPDATE Records SET point = :point WHERE id = :id');
+                $st->execute(
+                    array(
+                        ':point' => $id,
+                        ':id' => $rec_id
+                    ));
+                break;
+            case 3:
+                //PolyLine
+                break;
+            case 5:
+                //Polygon
+                break;
+            case 8:
+                //MultiPoint
+                $id = $this->loadMultiPoint($content_length, false, false);
+
+                $st = $this->conn->prepare('UPDATE Records SET multi_point = :multi_point WHERE id = :id');
+                $st->execute(
+                    array(
+                        ':multi_point' => $id,
+                        ':id' => $rec_id
+                    ));
+                break;
+            case 11:
+                //PointZ
+                $id = $this->loadPoint($content_length, true, true);
+
+                $st = $this->conn->prepare('UPDATE Records SET point = :point WHERE id = :id');
+                $st->execute(
+                    array(
+                        ':point' => $id,
+                        ':id' => $rec_id
+                    ));
+                break;
+            case 13:
+                //PolyLineZ
+                break;
+            case 15:
+                //PolygonZ
+                break;
+            case 18:
+                //MultiPointZ
+                $id = $this->loadMultiPoint($content_length, true, true);
+
+                $st = $this->conn->prepare('UPDATE Records SET multi_point = :multi_point WHERE id = :id');
+                $st->execute(
+                    array(
+                        ':multi_point' => $id,
+                        ':id' => $rec_id
+                    ));
+                break;
+            case 21:
+                //PointM
+                $id = $this->loadPoint($content_length, true, false);
+
+                $st = $this->conn->prepare('UPDATE Records SET point = :point WHERE id = :id');
+                $st->execute(
+                    array(
+                        ':point' => $id,
+                        ':id' => $rec_id
+                    ));
+                break;
+            case 23:
+                //PolyLineM
+                break;
+            case 25:
+                //PolygonM
+                break;
+            case 28:
+                //MultiPointM
+                $id = $this->loadMultiPoint($content_length, true, false);
+
+                $st = $this->conn->prepare('UPDATE Records SET multi_point = :multi_point WHERE id = :id');
+                $st->execute(
+                    array(
+                        ':multi_point' => $id,
+                        ':id' => $rec_id
+                    ));
+                break;
+            case 31:
+                //MultiPatch
+                break;
+        }
+
+        return $content_length;
+    }
+
+    /**
+     * Load a Point and insert it into the database.
+     *
+     * A point record is structured as follows:
+     * <ul>
+     *  <li>Byte 4: x (Double Little Endian)</li>
+     *  <li>Byte 12: y (Double Little Endian)</li>
+     *  <li>Byte 20 *: m (Double Little Endian)</li>
+     *  <li>Byte 20 **: z (Double Little Endian)</li>
+     *  <li>Byte 28 **: m (Double Little Endian)</li>
+     * </ul>
+     *
+     * *  these bytes are available when it is a PointM shape
+     *
+     * ** these bytes are available when it is a PointZ shape
+     *
+     * @param int $content_length The content length of the point record.
+     * @param boolean $measure This values tells if the values of the point are measured.
+     * @param boolean $depth This values tells if the values of the point are 3D.
+     * @return string The id with which the point was added to the database.
+     * @throws exception\InvalidContentLengthException Thrown when the read content length is different to the length in the record header.
+     */
+    private function loadPoint($content_length, $measure, $depth) {
+
+        //2 because the header was already read
+        $cl = 2;
+
+        $x = $this->loadData(DOUBLE_TYPE);
+        $cl += 4;
+
+        $y = $this->loadData(DOUBLE_TYPE);
+        $cl += 4;
+
+        $z = 0.0;
+        $m = 0.0;
+
+        if($depth) {
+            $z = $this->loadData(DOUBLE_TYPE);
+            $cl += 4;
+        }
+
+        if($cl == $content_length) {
+            $measure = false;
+        }
+
+        if($measure) {
+            $m = $this->loadData(DOUBLE_TYPE);
+
+            $cl += 4;
+        }
+
+        $this->checkContentLengthIsSame($content_length, $cl);
+
+        $st = $this->conn->prepare('INSERT INTO Points (x, y, z, m) VALUES (:x, :y, :z, :m)');
+        $st->execute(
+            array(
+                ':x' => $x,
+                ':y' => $y,
+                ':z' => $z,
+                ':m' => $m
+            ));
+
+        return $this->conn->lastInsertId();
+    }
+
+    private function loadMultiPoint($content_length, $measure, $depth) {
+
+        //2 because the header was already read
+        $cl = 2;
+
+        $box_id = $this->loadBoundingBox(false, false);
+        $cl += 16;
+
+        $st = $this->conn->prepare('INSERT INTO MultiPoints (bounding_box) VALUES (:bounding_box)');
+        $st->execute(
+            array(
+                ':bounding_box' => $box_id
+            ));
+        $mp_id = $this->conn->lastInsertId();
+
+        $num_points = $this->loadData(LITTLE_ENDIAN);
+        $cl += 2;
+
+        $p_ids = array();
+        for($i = 0; $i < $num_points; $i++) {
+            $p_id = $this->loadPoint(10, false, false);
+            $p_ids[] = $p_id;
+
+            $st = $this->conn->prepare('UPDATE Points SET multi_point = :multi_point WHERE id = :id');
+            $st->execute(
+                array(
+                    ':multi_point' => $mp_id,
+                    ':id' => $p_id
+                ));
+
+            $cl += 8;
+        }
+
+        if($depth) {
+            $z_min = $this->loadData(DOUBLE_TYPE);
+            $cl += 4;
+
+            $z_max = $this->loadData(DOUBLE_TYPE);
+            $cl += 4;
+
+            $st = $this->conn->prepare('UPDATE Bounding_Boxes SET z_min = :z_min, z_max = :z_max WHERE id = :id');
+            $st->execute(
+                array(
+                    ':z_min' => $z_min,
+                    ':z_max' => $z_max,
+                    ':id' => $box_id
+                ));
+
+            for($i = 0; $i < $num_points; $i++) {
+                $z = $this->loadData(DOUBLE_TYPE);
+                $cl += 4;
+
+                $st = $this->conn->prepare('UPDATE Points SET z = :z WHERE id = :id');
+                $st->execute(
+                    array(
+                        ':z' => $z,
+                        ':id' => $p_ids[$i]
+                    ));
+            }
+        }
+
+        if($cl == $content_length) {
+            $measure = false;
+        }
+
+        if($measure) {
+            $m_min = $this->loadData(DOUBLE_TYPE);
+            $cl += 4;
+
+            $m_max = $this->loadData(DOUBLE_TYPE);
+            $cl += 4;
+
+            $st = $this->conn->prepare('UPDATE Bounding_Boxes SET m_min = :m_min, m_max = :m_max WHERE id = :id');
+            $st->execute(
+                array(
+                    ':m_min' => $m_min,
+                    ':m_max' => $m_max,
+                    ':id' => $box_id
+                ));
+
+            for($i = 0; $i < $num_points; $i++) {
+                $m = $this->loadData(DOUBLE_TYPE);
+                $cl += 4;
+
+                $st = $this->conn->prepare('UPDATE Points SET m = :m WHERE id = :id');
+                $st->execute(
+                    array(
+                        ':m' => $m,
+                        ':id' => $p_ids[$i]
+                    ));
+            }
+        }
+
+        $this->checkContentLengthIsSame($content_length, $cl);
+
+        return $this->conn->lastInsertId();
     }
 
     /**
@@ -244,5 +570,38 @@ class shpParser {
         }
 
         throw new InvalidDataTypeException('The data type '.$type.' is unknown. Type can only be d,V or N');
+    }
+
+    /**
+     * This function looks into the database to check if a specific shape type id exists.
+     *
+     * @param string $id The shape type id which should be checked.
+     * @return bool True if the shape type id exists, otherwise false.
+     */
+    private function doesShapeTypeExist($id) {
+        $st = $this->conn->prepare('SELECT * FROM Shape_types WHERE id = ":id"');
+        $st->execute(
+            array(
+                ':id' => $id
+            ));
+
+        if($st->rowCount() == 0) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Helper function which checks if two content lengths are the same.
+     *
+     * @param int $expected The expected content length.
+     * @param int $read The read content length.
+     * @throws exception\InvalidContentLengthException Thrown when the first content length is different to the second length in the record header.
+     */
+    private function checkContentLengthIsSame($expected, $read) {
+        if($expected != $read) {
+            throw new InvalidContentLengthException('Content length was excepted to be '.$expected.' but read '.$read);
+        }
     }
 } 
