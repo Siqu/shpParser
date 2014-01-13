@@ -17,7 +17,7 @@ define('TOO_SMALL', -pow(10, 38));
 
 /**
  * Class shpParser
- * Parser for ESRI ShapeFiles
+ * Parser for ESRI ShapeFiles.
  *
  * @package sP
  * @author Sebastian Paulmichl siquent@me.com
@@ -32,9 +32,11 @@ class shpParser {
 
     /**
      * This array contains the known data types.
-     * d - Double value 8 bytes long
-     * V - unsigned long with little endian 4 bytes long
-     * N - unsigned long with big endian 4 bytes long
+     * <ul>
+     *  <li>d - Double value 8 bytes long</li>
+     *  <li>V - unsigned long with little endian 4 bytes long</li>
+     *  <li>N - unsigned long with big endian 4 bytes long</li>
+     * </ul>
      * @var array
      */
     private $dataLength = array(
@@ -44,9 +46,9 @@ class shpParser {
     );
 
     /**
-     * Creates a new shpParser object, establishes a new Database connection and starts loading the data
+     * Creates a new shpParser object, establishes a new Database connection and starts loading the data.
      *
-     * @param string $path
+     * @param string $path The relative path to the ESRI Shape File.
      */
     public function __construct($path) {
         $this->path = $path;
@@ -59,14 +61,14 @@ class shpParser {
             ));
 
         if($st->rowCount() != 0) {
-            print 'ShapeFile is allready loaded in the database';
+            print 'ShapeFile is already loaded in the database';
         } else {
             $this->load();
         }
     }
 
     /**
-     * Start loading the Shape File
+     * Start loading the Shape File.
      */
     private function load() {
         if(!file_exists($this->path)) {
@@ -84,6 +86,28 @@ class shpParser {
         fclose($this->shpFile);
     }
 
+    /**
+     * Load the main SHP File Header.
+     * The header is 100 bytes long and is structured as follows:
+     * <ul>
+     *  <li>Byte 0: File Code (Integer Big Endian)</li>
+     *  <li>Byte 4 - 20: Unused (Integer Big Endian)</li>
+     *  <li>Byte 24: File Length (Integer Big Endian)</li>
+     *  <li>Byte 28: Version (Integer Little Endian)</li>
+     *  <li>Byte 32: Shape Type (Integer Little Endian)</li>
+     *  <li>Byte 36: Bounding box x_min (Double Big Endian)</li>
+     *  <li>Byte 44: Bounding box y_min (Double Big Endian)</li>
+     *  <li>Byte 52: Bounding box x_max (Double Big Endian)</li>
+     *  <li>Byte 60: Bounding box y_max (Double Big Endian)</li>
+     *  <li>Byte 68: Bounding box z_min (Double Big Endian)</li>
+     *  <li>Byte 76: Bounding box z_max (Double Big Endian)</li>
+     *  <li>Byte 84: Bounding box m_min (Double Big Endian)</li>
+     *  <li>Byte 92: Bounding box m_max (Double Big Endian)</li>
+     * </ul>
+     *
+     * @throws exception\InvalidShapeTypeException Thrown when the read Shape Type is unknown.
+     * @throws exception\InvalidFileCodeException Thrown when the read File Code is not 9994.
+     */
     private function loadMainFileHeader() {
         $file_code = $this->loadData(BIG_ENDIAN);
 
@@ -107,24 +131,72 @@ class shpParser {
             throw new InvalidShapeTypeException('The shape type '.$shape_type.' is unknown.');
         }
 
-        $st = $this->conn->prepare('INSERT INTO Shape_Files (path, file_length, version, shape_type) VALUES (:path, :file_length, :version, :shape_type)');
+        $box_id = $this->loadBoundingBox(true, true);
+
+        $st = $this->conn->prepare('INSERT INTO Shape_Files (path, file_length, version, shape_type, bounding_box) VALUES (:path, :file_length, :version, :shape_type, :bounding_box)');
         $st->execute(
             array(
                 ':path' => $this->path,
                 ':file_length' => $file_length,
                 ':version' => $version,
-                ':shape_type' => $shape_type
+                ':shape_type' => $shape_type,
+                ':bounding_box' => $box_id
             ));
 
         $this->shpId = $this->conn->lastInsertId();
     }
 
     /**
-     * Low level data type reading function
+     * Load a bounding box and insert it into the database.
      *
-     * @param string $type the data type
-     * @return float|int|mixed|null 0 if it read no a ESRI no data concept, null if the data type is unknown or the read value
-     * @throws \Exception when an unknown Exception occurs
+     * @param boolean $measure This values tells if the values of the bounding box are measured.
+     * @param boolean $depth This values tells if the values of the bounding box are 3D.
+     * @return string The id with which the bounding box was added to the database.
+     */
+    private function loadBoundingBox($measure, $depth) {
+
+        $x_min = $this->loadData(DOUBLE_TYPE);
+        $y_min = $this->loadData(DOUBLE_TYPE);
+        $x_max = $this->loadData(DOUBLE_TYPE);
+        $y_max = $this->loadData(DOUBLE_TYPE);
+        $z_min = 0.0;
+        $z_max = 0.0;
+        $m_min = 0.0;
+        $m_max = 0.0;
+
+        if($depth) {
+            $z_min = $this->loadData(DOUBLE_TYPE);
+            $z_max = $this->loadData(DOUBLE_TYPE);
+        }
+
+        if($measure) {
+            $m_min = $this->loadData(DOUBLE_TYPE);
+            $m_max = $this->loadData(DOUBLE_TYPE);
+        }
+
+        $st = $this->conn->prepare('INSERT INTO Bounding_Boxes (x_min, x_max, y_min, y_max, z_min, z_max, m_min, m_max) VALUES (:x_min, :x_max, :y_min, :y_max, :z_min, :z_max, :m_min, :m_max)');
+        $st->execute(
+            array(
+                ':x_min' => $x_min,
+                ':x_max' => $x_max,
+                ':y_min' => $y_min,
+                ':y_max' => $y_max,
+                ':z_min' => $z_min,
+                ':z_max' => $z_max,
+                ':m_min' => $m_min,
+                ':m_max' => $m_max
+            ));
+
+        return $this->conn->lastInsertId();
+    }
+
+    /**
+     * Low level data type reading function.
+     *
+     * @param string $type The data type.
+     * @see getLengthForDataFormat()
+     * @return float|int|mixed|null 0 if it read a ESRI no data concept, null if the data type is unknown or the read value.
+     * @throws \Exception When an unknown Exception occurs.
      */
     private function loadData($type) {
         try {
@@ -153,13 +225,17 @@ class shpParser {
 
     /**
      * Returns the data length for a specific type.
+     *
      * Known types:
-     *              - d for double values
-     *              - V for unsigned long with little endian
-     *              - N for unsigned long with big endian
-     * @param string $type the data type
-     * @return mixed the length for the specified type
-     * @throws InvalidDataTypeException When the data type is unknown
+     * <ul>
+     *  <li>d for double values - has a length of 8</li>
+     *  <li>V for unsigned long with little endian - has a length of 4</li>
+     *  <li>N for unsigned long with big endian- has a length of 4</li>
+     * </ul>
+     *
+     * @param string $type The data type.
+     * @return integer The length for the specified type.
+     * @throws InvalidDataTypeException When the data type is unknown.
      */
     private function getLengthForDataFormat($type) {
 
