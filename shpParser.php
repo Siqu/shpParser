@@ -316,9 +316,9 @@ class shpParser {
      * <ul>
      *  <li>Byte 4: x (Double Little Endian)</li>
      *  <li>Byte 12: y (Double Little Endian)</li>
-     *  <li>Byte 20 *: m (Double Little Endian)</li>
-     *  <li>Byte 20 **: z (Double Little Endian)</li>
-     *  <li>Byte 28 **: m (Double Little Endian)</li>
+     *  <li>* Byte 20: m (Double Little Endian)</li>
+     *  <li>** Byte 20: z (Double Little Endian)</li>
+     *  <li>** Byte 28: m (Double Little Endian)</li>
      * </ul>
      *
      * *  these bytes are available when it is a PointM shape
@@ -329,7 +329,6 @@ class shpParser {
      * @param boolean $measure This values tells if the values of the point are measured.
      * @param boolean $depth This values tells if the values of the point are 3D.
      * @return string The id with which the point was added to the database.
-     * @throws exception\InvalidContentLengthException Thrown when the read content length is different to the length in the record header.
      */
     private function loadPoint($content_length, $measure, $depth) {
 
@@ -374,6 +373,41 @@ class shpParser {
         return $this->conn->lastInsertId();
     }
 
+    /**
+     * Load a MultiPoint and insert it into the database.
+     *
+     * A multi point record is structured as follows:
+     * <ul>
+     *  <li>Byte 4: Bounding Box (Double Little Endian)</li>
+     *  <li>Byte 36: Number of Points (Integer Little Endian)</li>
+     *  <li>Byte 40: Points (Point Little Endian)</li>
+     *  <li>* Byte X: m_min (Double Little Endian)</li>
+     *  <li>* Byte X+8: m_max (Double Little Endian)</li>
+     *  <li>* Byte X+16: m_array (Double Little Endian)</li>
+     *  <li>** Byte X: z_min (Double Little Endian)</li>
+     *  <li>** Byte X+8: z_max (Double Little Endian)</li>
+     *  <li>** Byte X+16: z_array (Double Little Endian)</li>
+     *  <li>** Byte Y: m_min (Double Little Endian)</li>
+     *  <li>** Byte Y+8: m_max (Double Little Endian)</li>
+     *  <li>** Byte Y+16: m_array (Double Little Endian)</li>
+     * </ul>
+     *
+     * Note:
+     *
+     * X = 40 + (16 * num_points)
+     *
+     * Y = X + 16 + (8 * num_points)
+     *
+     *
+     * *  these bytes are available when it is a PointM shape
+     *
+     * ** these bytes are available when it is a PointZ shape
+     *
+     * @param int $content_length The content length of the multi point record.
+     * @param boolean $measure This values tells if the values of the multi point are measured.
+     * @param boolean $depth This values tells if the values of the multi point are 3D.
+     * @return string The id with which the multi point was added to the database.
+     */
     private function loadMultiPoint($content_length, $measure, $depth) {
 
         //2 because the header was already read
