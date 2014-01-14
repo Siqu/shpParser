@@ -24,6 +24,14 @@ This script will support all common shape types (available shape types are marke
 - [] PolygonM
 - [] MultiPatch
 
+TODOs
+-----
+
+- [] Add database configuration
+- [] Add the missing shape types
+- [] Add methods to work with the data in the database
+- [] Add export functions for different formats (e.g. .kml, .xml, ...)
+
 
 Copyright
 ---------
