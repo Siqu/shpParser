@@ -11,7 +11,7 @@ USE `shpParser` ;
 DROP TABLE IF EXISTS `shpParser`.`Shape_Types` ;
 
 CREATE  TABLE IF NOT EXISTS `shpParser`.`Shape_Types` (
-  `id` INT NOT NULL AUTO_INCREMENT ,
+  `id` INT NOT NULL,
   `name` VARCHAR(255) NOT NULL ,
   PRIMARY KEY (`id`) )
 ENGINE = InnoDB;
@@ -231,3 +231,18 @@ ENGINE = InnoDB;
 SET SQL_MODE=@OLD_SQL_MODE;
 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS;
 SET UNIQUE_CHECKS=@OLD_UNIQUE_CHECKS;
+
+INSERT INTO `Shape_types` (`id`,`name`) VALUES (0,'Null Shape');
+INSERT INTO `Shape_types` (`id`,`name`) VALUES (1,'Point');
+INSERT INTO `Shape_types` (`id`,`name`) VALUES (3,'PolyLine');
+INSERT INTO `Shape_types` (`id`,`name`) VALUES (5,'Polygon');
+INSERT INTO `Shape_types` (`id`,`name`) VALUES (8,'MultiPoint');
+INSERT INTO `Shape_types` (`id`,`name`) VALUES (11,'PointZ');
+INSERT INTO `Shape_types` (`id`,`name`) VALUES (13,'PolyLineZ');
+INSERT INTO `Shape_types` (`id`,`name`) VALUES (15,'PolygonZ');
+INSERT INTO `Shape_types` (`id`,`name`) VALUES (18,'MultiPointZ');
+INSERT INTO `Shape_types` (`id`,`name`) VALUES (21,'PointM');
+INSERT INTO `Shape_types` (`id`,`name`) VALUES (23,'PolyLineM');
+INSERT INTO `Shape_types` (`id`,`name`) VALUES (25,'PolygonM');
+INSERT INTO `Shape_types` (`id`,`name`) VALUES (28,'MultiPointM');
+INSERT INTO `Shape_types` (`id`,`name`) VALUES (31,'MultiPatch');

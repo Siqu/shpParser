@@ -90,7 +90,7 @@ class shpParser {
         $this->loadMainFileHeader();
         $this->loadMainFileData();
 
-        //$this->conn->commit();
+        $this->conn->commit();
 
         fclose($this->shpFile);
     }
@@ -469,7 +469,7 @@ class shpParser {
 
         $this->checkContentLengthIsSame($content_length, $cl);
 
-        return $this->conn->lastInsertId();
+        return $mp_id;
     }
 
     /**
@@ -536,9 +536,9 @@ class shpParser {
                 $val = current($r_data);
 
                 if($val < TOO_SMALL) {
-                    return 0;
+                    return 0.0;
                 }
-                return round($val, 3);
+                return $val;
             } else {
                 return current($r_data);
             }
