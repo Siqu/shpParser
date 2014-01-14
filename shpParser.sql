@@ -246,3 +246,13 @@ INSERT INTO `Shape_types` (`id`,`name`) VALUES (23,'PolyLineM');
 INSERT INTO `Shape_types` (`id`,`name`) VALUES (25,'PolygonM');
 INSERT INTO `Shape_types` (`id`,`name`) VALUES (28,'MultiPointM');
 INSERT INTO `Shape_types` (`id`,`name`) VALUES (31,'MultiPatch');
+
+
+ALTER TABLE Bounding_Boxes AUTO_INCREMENT = 0;
+ALTER TABLE MultiPoints AUTO_INCREMENT = 0;
+ALTER TABLE Parts AUTO_INCREMENT = 0;
+ALTER TABLE Points AUTO_INCREMENT = 0;
+ALTER TABLE Polygon AUTO_INCREMENT = 0;
+ALTER TABLE PolyLine AUTO_INCREMENT = 0;
+ALTER TABLE Records AUTO_INCREMENT = 0;
+ALTER TABLE Shape_Files AUTO_INCREMENT = 0;
