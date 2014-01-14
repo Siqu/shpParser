@@ -230,6 +230,14 @@ class shpParser {
                 break;
             case 3:
                 //PolyLine
+                $id = $this->loadPolyLine($content_length, false, false);
+
+                $st = $this->conn->prepare('UPDATE Records SET poly_line = :poly_line WHERE id = :id');
+                $st->execute(
+                    array(
+                        ':poly_line' => $id,
+                        ':id' => $rec_id
+                    ));
                 break;
             case 5:
                 //Polygon
@@ -258,6 +266,14 @@ class shpParser {
                 break;
             case 13:
                 //PolyLineZ
+                $id = $this->loadPolyLine($content_length, true, true);
+
+                $st = $this->conn->prepare('UPDATE Records SET poly_line = :poly_line WHERE id = :id');
+                $st->execute(
+                    array(
+                        ':poly_line' => $id,
+                        ':id' => $rec_id
+                    ));
                 break;
             case 15:
                 //PolygonZ
@@ -286,6 +302,14 @@ class shpParser {
                 break;
             case 23:
                 //PolyLineM
+                $id = $this->loadPolyLine($content_length, true, false);
+
+                $st = $this->conn->prepare('UPDATE Records SET poly_line = :poly_line WHERE id = :id');
+                $st->execute(
+                    array(
+                        ':poly_line' => $id,
+                        ':id' => $rec_id
+                    ));
                 break;
             case 25:
                 //PolygonM
@@ -396,12 +420,13 @@ class shpParser {
      *
      * X = 40 + (16 * num_points)
      *
+     * //When MultiPointZ
      * Y = X + 16 + (8 * num_points)
      *
      *
-     * *  these bytes are available when it is a PointM shape
+     * *  these bytes are available when it is a MultiPointM shape
      *
-     * ** these bytes are available when it is a PointZ shape
+     * ** these bytes are available when it is a MultiPointZ shape
      *
      * @param int $content_length The content length of the multi point record.
      * @param boolean $measure This values tells if the values of the multi point are measured.
@@ -504,6 +529,126 @@ class shpParser {
         $this->checkContentLengthIsSame($content_length, $cl);
 
         return $mp_id;
+    }
+
+    /**
+     * Load a PolyLine and insert it into the database.
+     *
+     * A poly line record is structured as follows:
+     * <ul>
+     *  <li>Byte 4: Bounding Box (Double Little Endian)</li>
+     *  <li>Byte 36: Number of Parts (Integer Little Endian)</li>
+     *  <li>Byte 40: Number of Points (Integer Little Endian)</li>
+     *  <li>Byte 44: Parts (Integer Little Endian)</li>
+     *  <li>Byte X: Points (Point Little Endian)</li>
+     *  <li>* Byte Y: m_min (Double Little Endian)</li>
+     *  <li>* Byte Y+8: m_max (Double Little Endian)</li>
+     *  <li>* Byte Y+16: m_array (Double Little Endian)</li>
+     *  <li>** Byte Y: z_min (Double Little Endian)</li>
+     *  <li>** Byte Y+8: z_max (Double Little Endian)</li>
+     *  <li>** Byte Y+16: z_array (Double Little Endian)</li>
+     *  <li>** Byte Z: m_min (Double Little Endian)</li>
+     *  <li>** Byte Z+8: m_max (Double Little Endian)</li>
+     *  <li>** Byte Z+16: m_array (Double Little Endian)</li>
+     * </ul>
+     *
+     * Note:
+     *
+     * X = 44 + (4 * num_parts)
+     *
+     * Y = X + (16 * num_points)
+     *
+     * //When PolyLineZ
+     *
+     * Z = Y + 16 + (8 * num_points)
+     *
+     *
+     * *  these bytes are available when it is a PointM shape
+     *
+     * ** these bytes are available when it is a PointZ shape
+     *
+     * @param int $content_length The content length of the poly line record.
+     * @param boolean $measure This values tells if the values of the poly line are measured.
+     * @param boolean $depth This values tells if the values of the poly line are 3D.
+     * @return string The id with which the poly line was added to the database.
+     */
+    private function loadPolyLine($content_length, $measure, $depth) {
+
+        //2 because the header was already read
+        $cl = 2;
+
+        $box_id = $this->loadBoundingBox(false, false);
+        $cl += 16;
+
+        $st = $this->conn->prepare('INSERT INTO PolyLine (bounding_box) VALUES (:bounding_box)');
+        $st->execute(
+            array(
+                ':bounding_box' => $box_id
+            ));
+        $pl_line = $this->conn->lastInsertId();
+
+        $num_parts = $this->loadData(LITTLE_ENDIAN);
+        $cl += 2;
+
+        $num_points = $this->loadData(LITTLE_ENDIAN);
+        $cl += 2;
+
+        $parts = array();
+        for($i = 0; $i < $num_parts; $i++) {
+            $part = $this->loadData(LITTLE_ENDIAN);
+            $cl += 2;
+
+            $st = $this->conn->prepare('INSERT INTO Parts (poly_line) VALUES (:poly_line)');
+            $st->execute(
+                array(
+                    ':poly_line' => $pl_line
+                ));
+
+            $parts[] = array(
+                'id' => $this->conn->lastInsertId(),
+                'point_index' => $part
+            );
+        }
+
+        $points = array();
+        $j = 0;
+
+        for($i = 0; $i < $num_points; $i++) {
+            if($j < (count($parts) - 1) && $parts[$j + 1]['point_index'] == $i) {
+                $j++;
+            }
+
+            $p_id = $this->loadPoint(10, false, false);
+            $points[]=  $p_id;
+
+            $st = $this->conn->prepare('UPDATE Parts SET poly_line = :poly_line WHERE id = :id');
+            $st->execute(
+                array(
+                    ':poly_line' => $pl_line,
+                    ':id' => $parts[$j]['id']
+                ));
+
+            $st = $this->conn->prepare('UPDATE Points SET part = :part WHERE id = :id');
+            $st->execute(
+                array(
+                    ':part' => $parts[$j]['id'],
+                    ':id' => $p_id
+                ));
+
+            $cl += 8;
+        }
+
+        if($depth) {
+            //TODO Add support for PolyLineZ
+        }
+
+        if($measure) {
+            //TODO Add support for PolyLineM
+        }
+
+        $this->checkContentLengthIsSame($content_length, $cl);
+
+        return $pl_line;
     }
 
     /**
