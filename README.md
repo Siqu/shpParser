@@ -17,8 +17,8 @@ This script will support all common shape types (available shape types are marke
 - [x] MultiPointZ
 - [x] MultiPointM
 - [x] PolyLine
-- [] PolyLineZ
-- [] PolyLineM
+- [X] PolyLineZ
+- [X] PolyLineM
 - [] Polygon
 - [] PolygonZ
 - [] PolygonM

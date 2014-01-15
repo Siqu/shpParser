@@ -639,11 +639,63 @@ class shpParser {
         }
 
         if($depth) {
-            //TODO Add support for PolyLineZ
+            $z_min = $this->loadData(DOUBLE_TYPE);
+            $cl += 4;
+
+            $z_max = $this->loadData(DOUBLE_TYPE);
+            $cl += 4;
+
+            $st = $this->conn->prepare('UPDATE Bounding_Boxes SET z_min = :z_min, z_max = :z_max WHERE id = :id');
+            $st->execute(
+                array(
+                    ':z_min' => $z_min,
+                    ':z_max' => $z_max,
+                    ':id' => $box_id
+                ));
+
+            for($i = 0; $i < $num_points; $i++) {
+                $z = $this->loadData(DOUBLE_TYPE);
+                $cl += 4;
+
+                $st = $this->conn->prepare('UPDATE Points SET z = :z WHERE id = :id');
+                $st->execute(
+                    array(
+                        ':z' => $z,
+                        ':id' => $points[$i]
+                    ));
+            }
+        }
+
+        if($cl == $content_length) {
+            $measure = false;
         }
 
         if($measure) {
-            //TODO Add support for PolyLineM
+            $m_min = $this->loadData(DOUBLE_TYPE);
+            $cl += 4;
+
+            $m_max = $this->loadData(DOUBLE_TYPE);
+            $cl += 4;
+
+            $st = $this->conn->prepare('UPDATE Bounding_Boxes SET m_min = :m_min, m_max = :m_max WHERE id = :id');
+            $st->execute(
+                array(
+                    ':m_min' => $m_min,
+                    ':m_max' => $m_max,
+                    ':id' => $box_id
+                ));
+
+            for($i = 0; $i < $num_points; $i++) {
+                $m = $this->loadData(DOUBLE_TYPE);
+                $cl += 4;
+
+                $st = $this->conn->prepare('UPDATE Points SET m = :m WHERE id = :id');
+                $st->execute(
+                    array(
+                        ':m' => $m,
+                        ':id' => $points[$i]
+                    ));
+            }
         }
 
         $this->checkContentLengthIsSame($content_length, $cl);
