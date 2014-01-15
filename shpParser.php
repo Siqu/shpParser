@@ -23,11 +23,14 @@ define('TOO_SMALL', -pow(10, 38));
 
 /**
  * Class shpParser
+ *
  * Parser for ESRI ShapeFiles.
  *
  * @package sP
  * @author Sebastian Paulmichl siquent@me.com
  * @version 1.0
+ * @copyright Copyright (c) 2014, Sebastian Paulmichl
+ * @license http://opensource.org/licenses/MIT  MIT License
  */
 class shpParser {
 

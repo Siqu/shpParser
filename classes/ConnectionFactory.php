@@ -14,6 +14,8 @@ define('DB_HOST', 'localhost');
  * @package sP\classes
  * @author Sebastian Paulmichl
  * @version 1.0
+ * @copyright Copyright (c) 2014, Sebastian Paulmichl
+ * @license http://opensource.org/licenses/MIT  MIT License
  */
 class ConnectionFactory {
 
