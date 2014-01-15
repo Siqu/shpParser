@@ -19,9 +19,9 @@ This script will support all common shape types (available shape types are marke
 - [x] PolyLine
 - [X] PolyLineZ
 - [X] PolyLineM
-- [] Polygon
-- [] PolygonZ
-- [] PolygonM
+- [X] Polygon
+- [X] PolygonZ
+- [X] PolygonM
 - [] MultiPatch
 
 TODOs

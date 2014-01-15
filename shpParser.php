@@ -241,6 +241,14 @@ class shpParser {
                 break;
             case 5:
                 //Polygon
+                $id = $this->loadPolygon($content_length, false, false);
+
+                $st = $this->conn->prepare('UPDATE Records SET polygon = :polygon WHERE id = :id');
+                $st->execute(
+                    array(
+                        ':polygon' => $id,
+                        ':id' => $rec_id
+                    ));
                 break;
             case 8:
                 //MultiPoint
@@ -277,6 +285,14 @@ class shpParser {
                 break;
             case 15:
                 //PolygonZ
+                $id = $this->loadPolygon($content_length, true, true);
+
+                $st = $this->conn->prepare('UPDATE Records SET polygon = :polygon WHERE id = :id');
+                $st->execute(
+                    array(
+                        ':polygon' => $id,
+                        ':id' => $rec_id
+                    ));
                 break;
             case 18:
                 //MultiPointZ
@@ -313,6 +329,14 @@ class shpParser {
                 break;
             case 25:
                 //PolygonM
+                $id = $this->loadPolygon($content_length, true, false);
+
+                $st = $this->conn->prepare('UPDATE Records SET polygon = :polygon WHERE id = :id');
+                $st->execute(
+                    array(
+                        ':polygon' => $id,
+                        ':id' => $rec_id
+                    ));
                 break;
             case 28:
                 //MultiPointM
@@ -563,9 +587,9 @@ class shpParser {
      * Z = Y + 16 + (8 * num_points)
      *
      *
-     * *  these bytes are available when it is a PointM shape
+     * *  these bytes are available when it is a PolyLineM shape
      *
-     * ** these bytes are available when it is a PointZ shape
+     * ** these bytes are available when it is a PolyLineZ shape
      *
      * @param int $content_length The content length of the poly line record.
      * @param boolean $measure This values tells if the values of the poly line are measured.
@@ -701,6 +725,179 @@ class shpParser {
         $this->checkContentLengthIsSame($content_length, $cl);
 
         return $pl_line;
+    }
+
+    /**
+     * Load a Polygon and insert it into the database.
+     *
+     * A polygon record is structured as follows:
+     * <ul>
+     *  <li>Byte 4: Bounding Box (Double Little Endian)</li>
+     *  <li>Byte 36: Number of Parts (Integer Little Endian)</li>
+     *  <li>Byte 40: Number of Points (Integer Little Endian)</li>
+     *  <li>Byte 44: Parts (Integer Little Endian)</li>
+     *  <li>Byte X: Points (Point Little Endian)</li>
+     *  <li>* Byte Y: m_min (Double Little Endian)</li>
+     *  <li>* Byte Y+8: m_max (Double Little Endian)</li>
+     *  <li>* Byte Y+16: m_array (Double Little Endian)</li>
+     *  <li>** Byte Y: z_min (Double Little Endian)</li>
+     *  <li>** Byte Y+8: z_max (Double Little Endian)</li>
+     *  <li>** Byte Y+16: z_array (Double Little Endian)</li>
+     *  <li>** Byte Z: m_min (Double Little Endian)</li>
+     *  <li>** Byte Z+8: m_max (Double Little Endian)</li>
+     *  <li>** Byte Z+16: m_array (Double Little Endian)</li>
+     * </ul>
+     *
+     * Note:
+     *
+     * X = 44 + (4 * num_parts)
+     *
+     * Y = X + (16 * num_points)
+     *
+     * //When PolygonZ
+     *
+     * Z = Y + 16 + (8 * num_points)
+     *
+     *
+     * *  these bytes are available when it is a PolygonM shape
+     *
+     * ** these bytes are available when it is a PolygonZ shape
+     *
+     * @param int $content_length The content length of the polygon record.
+     * @param boolean $measure This values tells if the values of the polygon are measured.
+     * @param boolean $depth This values tells if the values of the polygon are 3D.
+     * @return string The id with which the polygon was added to the database.
+     */
+    private function loadPolygon($content_length, $measure, $depth) {
+
+        //2 because the header was already read
+        $cl = 2;
+
+        $box_id = $this->loadBoundingBox(false, false);
+        $cl += 16;
+
+        $st = $this->conn->prepare('INSERT INTO Polygon (bounding_box) VALUES (:bounding_box)');
+        $st->execute(
+            array(
+                ':bounding_box' => $box_id
+            ));
+        $pg = $this->conn->lastInsertId();
+
+        $num_parts = $this->loadData(LITTLE_ENDIAN);
+        $cl += 2;
+
+        $num_points = $this->loadData(LITTLE_ENDIAN);
+        $cl += 2;
+
+        $parts = array();
+        for($i = 0; $i < $num_parts; $i++) {
+            $part = $this->loadData(LITTLE_ENDIAN);
+            $cl += 2;
+
+            $st = $this->conn->prepare('INSERT INTO Parts (polygon) VALUES (:polygon)');
+            $st->execute(
+                array(
+                    ':polygon' => $pg
+                ));
+
+            $parts[] = array(
+                'id' => $this->conn->lastInsertId(),
+                'point_index' => $part
+            );
+        }
+
+        $points = array();
+        $j = 0;
+
+        for($i = 0; $i < $num_points; $i++) {
+            //TODO Add check if the last and first point of every polygon vertex is the same
+            if($j < (count($parts) - 1) && $parts[$j + 1]['point_index'] == $i) {
+                $j++;
+            }
+
+            $p_id = $this->loadPoint(10, false, false);
+            $points[]=  $p_id;
+
+            $st = $this->conn->prepare('UPDATE Parts SET polygon = :polygon WHERE id = :id');
+            $st->execute(
+                array(
+                    ':polygon' => $pg,
+                    ':id' => $parts[$j]['id']
+                ));
+
+            $st = $this->conn->prepare('UPDATE Points SET part = :part WHERE id = :id');
+            $st->execute(
+                array(
+                    ':part' => $parts[$j]['id'],
+                    ':id' => $p_id
+                ));
+
+            $cl += 8;
+        }
+
+        if($depth) {
+            $z_min = $this->loadData(DOUBLE_TYPE);
+            $cl += 4;
+
+            $z_max = $this->loadData(DOUBLE_TYPE);
+            $cl += 4;
+
+            $st = $this->conn->prepare('UPDATE Bounding_Boxes SET z_min = :z_min, z_max = :z_max WHERE id = :id');
+            $st->execute(
+                array(
+                    ':z_min' => $z_min,
+                    ':z_max' => $z_max,
+                    ':id' => $box_id
+                ));
+
+            for($i = 0; $i < $num_points; $i++) {
+                $z = $this->loadData(DOUBLE_TYPE);
+                $cl += 4;
+
+                $st = $this->conn->prepare('UPDATE Points SET z = :z WHERE id = :id');
+                $st->execute(
+                    array(
+                        ':z' => $z,
+                        ':id' => $points[$i]
+                    ));
+            }
+        }
+
+        if($cl == $content_length) {
+            $measure = false;
+        }
+
+        if($measure) {
+            $m_min = $this->loadData(DOUBLE_TYPE);
+            $cl += 4;
+
+            $m_max = $this->loadData(DOUBLE_TYPE);
+            $cl += 4;
+
+            $st = $this->conn->prepare('UPDATE Bounding_Boxes SET m_min = :m_min, m_max = :m_max WHERE id = :id');
+            $st->execute(
+                array(
+                    ':m_min' => $m_min,
+                    ':m_max' => $m_max,
+                    ':id' => $box_id
+                ));
+
+            for($i = 0; $i < $num_points; $i++) {
+                $m = $this->loadData(DOUBLE_TYPE);
+                $cl += 4;
+
+                $st = $this->conn->prepare('UPDATE Points SET m = :m WHERE id = :id');
+                $st->execute(
+                    array(
+                        ':m' => $m,
+                        ':id' => $points[$i]
+                    ));
+            }
+        }
+
+        $this->checkContentLengthIsSame($content_length, $cl);
+
+        return $pg;
     }
 
     /**
